@@ -1,5 +1,7 @@
 # Landing AI ADE Plugin
 
+[ai_landing.webm](https://github.com/user-attachments/assets/9b17a479-0e8e-4b0a-a21c-733c45cf35ac)
+
 A FiftyOne plugin that provides operators for parsing, extracting, and splitting
 documents using [Landing AI](https://landing.ai)'s Agentic Document Extraction
 (ADE) API. Converts PDFs, images, spreadsheets, and Office files into structured
