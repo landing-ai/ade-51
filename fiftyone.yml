@@ -1,0 +1,31 @@
+name: "@landingai/ade"
+type: plugin
+label: Landing AI ADE
+description: >
+  Parse, extract, and split documents using Landing AI Agentic Document Extraction (ADE).
+  Converts PDFs, images, spreadsheets, and Office files into structured Markdown with
+  spatial bounding box grounding. Supports schema-based field extraction and
+  multi-document splitting/classification.
+version: 0.1.0
+author: Landing AI
+license: Apache-2.0
+url: https://github.com/landing-ai/fiftyone-landingai-ade
+
+tags:
+  - document-analysis
+  - pdf
+  - extraction
+  - ocr
+  - grounding
+  - ai
+
+operators:
+  - ade_parse_document
+  - ade_extract_fields
+  - ade_split_document
+
+secrets:
+  - VISION_AGENT_API_KEY
+
+fiftyone:
+  version: ">=0.23.0"
