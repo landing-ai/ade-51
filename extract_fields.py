@@ -12,6 +12,7 @@ try:
     from .utils import (
         add_model_input,
         add_extract_model_input,
+        add_password_input,
         add_region_input,
         ade_box_to_fo,
         check_api_key,
@@ -19,11 +20,13 @@ try:
         filter_ade_samples,
         get_api_key,
         get_client,
+        to_plain_data,
     )
 except ImportError:
     from utils import (
         add_model_input,
         add_extract_model_input,
+        add_password_input,
         add_region_input,
         ade_box_to_fo,
         check_api_key,
@@ -31,6 +34,7 @@ except ImportError:
         filter_ade_samples,
         get_api_key,
         get_client,
+        to_plain_data,
     )
 
 
@@ -121,6 +125,7 @@ class ADEExtractFields(foo.Operator):
 
         if parse_first:
             add_model_input(inputs)
+            add_password_input(inputs)
 
         add_extract_model_input(inputs)
 
@@ -134,6 +139,15 @@ class ADEExtractFields(foo.Operator):
                     "paying parse credits again. Leave blank to skip."
                 ),
                 default="ade_parse",
+            )
+            inputs.str(
+                "save_grounding_field",
+                label="Save grounding to field",
+                description=(
+                    "Save grounding detections from the parse step to this dataset field. "
+                    "Leave blank to skip."
+                ),
+                default="ade_grounding",
             )
         else:
             inputs.str(
@@ -228,8 +242,10 @@ class ADEExtractFields(foo.Operator):
         region = ctx.params.get("region", "us")
         parse_first = ctx.params.get("parse_first", True)
         model = ctx.params.get("model", "dpt-2")
+        password = (ctx.params.get("password") or "").strip()
         parse_field = ctx.params.get("parse_field", "ade_parse")
         save_parse_field = (ctx.params.get("save_parse_field") or "").strip()
+        save_grounding_field = (ctx.params.get("save_grounding_field") or "").strip()
         extract_model = ctx.params.get("extract_model", "extract-latest")
         grounding_field = ctx.params.get("grounding_field", "ade_grounding")
         result_field = ctx.params.get("result_field", "ade_extraction")
@@ -254,15 +270,29 @@ class ADEExtractFields(foo.Operator):
 
         json_schema_str = json.dumps({"type": "object", "properties": properties})
 
+        conflicting_fields = []
         for key, props in properties.items():
             field_name = f"{result_field}_{key}"
             expected_type = _FO_TYPE_MAP.get(props.get("type", "string"))
             existing_field = ctx.dataset.get_field(field_name)
             if existing_field is not None and expected_type and not isinstance(existing_field, expected_type):
-                try:
-                    ctx.dataset.delete_sample_field(field_name)
-                except Exception:
-                    pass
+                conflicting_fields.append(
+                    f"{field_name} ({existing_field.__class__.__name__} vs {expected_type.__name__})"
+                )
+
+        if conflicting_fields:
+            preview = ", ".join(conflicting_fields[:3])
+            if len(conflicting_fields) > 3:
+                preview += f", and {len(conflicting_fields) - 3} more"
+            return {
+                "error": (
+                    "Output fields already exist with incompatible FiftyOne types. "
+                    "Choose a new output field prefix or delete the conflicting fields first: "
+                    f"{preview}"
+                ),
+                "processed": 0,
+                "total": 0,
+            }
 
         client = get_client(api_key, region)
 
@@ -290,8 +320,13 @@ class ADEExtractFields(foo.Operator):
             try:
                 parse_resp = None
                 if parse_first:
-                    parse_resp = client.parse(document=Path(sample.filepath), model=model)
+                    parse_kwargs = {"document": Path(sample.filepath), "model": model}
+                    if password:
+                        parse_kwargs["password"] = password
+
+                    parse_resp = client.parse(**parse_kwargs)
                     markdown_content = parse_resp.markdown
+                    parse_version = getattr(parse_resp.metadata, "version", None)
 
                     if save_parse_field:
                         sample[save_parse_field] = markdown_content
@@ -300,12 +335,13 @@ class ADEExtractFields(foo.Operator):
                             "credit_usage": float(parse_resp.metadata.credit_usage or 0),
                             "filename": parse_resp.metadata.filename,
                             "duration_ms": parse_resp.metadata.duration_ms,
-                            "model_version": getattr(parse_resp.metadata, "version", None),
+                            "version": parse_version,
+                            "model_version": parse_version,
                         }
-                        if parse_resp.grounding:
-                            detections = grounding_to_detections(parse_resp.grounding)
-                            if detections:
-                                sample["ade_grounding"] = detections
+                    if save_grounding_field and parse_resp.grounding:
+                        detections = grounding_to_detections(parse_resp.grounding)
+                        if detections:
+                            sample[save_grounding_field] = detections
                 else:
                     markdown_content = sample.get_field(parse_field)
                     if not markdown_content:
@@ -317,9 +353,13 @@ class ADEExtractFields(foo.Operator):
 
                 extract_resp = client.extract(schema=json_schema_str, markdown=markdown_content, model=extract_model)
 
-                extraction = extract_resp.extraction
+                extraction = to_plain_data(extract_resp.extraction) or {}
                 if not isinstance(extraction, dict):
-                    extraction = json.loads(json.dumps(extraction, default=str))
+                    raise TypeError("Extract response returned a non-object payload.")
+
+                for key in properties:
+                    sample[f"{result_field}_{key}"] = None
+                sample[f"{result_field}_grounding"] = None
 
                 for key, value in extraction.items():
                     field_type = properties.get(key, {}).get("type", "string")
@@ -347,19 +387,24 @@ class ADEExtractFields(foo.Operator):
                     if value is not None:
                         sample[f"{result_field}_{key}"] = value
 
-                extraction_metadata = extract_resp.extraction_metadata
+                extraction_metadata = to_plain_data(extract_resp.extraction_metadata)
                 if isinstance(extraction_metadata, dict):
                     chunk_map = _build_chunk_map(sample, parse_resp, grounding_field)
                     detections = _extraction_metadata_to_detections(extraction_metadata, chunk_map)
                     if detections:
                         sample[f"{result_field}_grounding"] = fol.Detections(detections=detections)
 
+                extract_metadata = getattr(extract_resp, "metadata", None)
+                extract_version = getattr(extract_metadata, "version", None)
                 sample[f"{result_field}_meta"] = {
-                    "credit_usage": float(getattr(extract_resp.metadata, "credit_usage", 0) or 0),
-                    "schema_violation_error": getattr(extract_resp.metadata, "schema_violation_error", None),
-                    "model_version": getattr(extract_resp.metadata, "fallback_model_version", None),
+                    "credit_usage": float(getattr(extract_metadata, "credit_usage", 0) or 0),
+                    "version": extract_version,
+                    "model_version": extract_version,
+                    "fallback_model_version": getattr(extract_metadata, "fallback_model_version", None),
+                    "schema_violation_error": getattr(extract_metadata, "schema_violation_error", None),
+                    "warnings": to_plain_data(getattr(extract_metadata, "warnings", [])) or [],
                 }
-                total_credits += float(getattr(extract_resp.metadata, "credit_usage", 0) or 0)
+                total_credits += float(getattr(extract_metadata, "credit_usage", 0) or 0)
                 sample.save()
                 processed += 1
 
@@ -372,6 +417,7 @@ class ADEExtractFields(foo.Operator):
             "processed": processed,
             "total": total,
             "errors": errors[:5],
+            "error_count": len(errors),
             "result_field": result_field,
             "field_count": len(properties),
             "total_credits": round(total_credits, 2),
@@ -384,6 +430,7 @@ class ADEExtractFields(foo.Operator):
         processed = result.get("processed", 0)
         total = result.get("total", 0)
         errors = result.get("errors", [])
+        error_count = result.get("error_count", len(errors))
         result_field = result.get("result_field", "ade_extraction")
         field_count = result.get("field_count", 0)
         total_credits = result.get("total_credits", 0)
@@ -403,8 +450,8 @@ class ADEExtractFields(foo.Operator):
             f"Stored under '{result_field}_*'. "
             f"Total credits used: {total_credits}."
         )
-        if errors:
-            summary += f" {len(errors)} error(s) — see below."
+        if error_count:
+            summary += f" {error_count} error(s) — see below."
 
         outputs.view("summary", types.Notice(label=summary))
 
@@ -435,18 +482,33 @@ def _build_chunk_map(sample, parse_resp, grounding_field: str) -> dict:
     return chunk_map
 
 
-def _extraction_metadata_to_detections(extraction_metadata: dict, chunk_map: dict) -> list:
+def _extraction_metadata_to_detections(extraction_metadata, chunk_map: dict, prefix: str = "") -> list:
     """Convert extraction metadata and a chunk map into a ``fo.Detection`` list."""
     detections = []
-    for field_name, meta in extraction_metadata.items():
-        if not isinstance(meta, dict):
-            continue
-        value = meta.get("value", "")
-        for ref in meta.get("references", []):
+
+    if isinstance(extraction_metadata, list):
+        for idx, item in enumerate(extraction_metadata):
+            child_prefix = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+            detections.extend(_extraction_metadata_to_detections(item, chunk_map, child_prefix))
+        return detections
+
+    if not isinstance(extraction_metadata, dict):
+        return detections
+
+    if "references" in extraction_metadata:
+        value = extraction_metadata.get("value", "")
+        label = prefix or "value"
+        for ref in extraction_metadata.get("references", []):
             bbox = chunk_map.get(ref)
             if bbox is None:
                 continue
             detections.append(
-                fol.Detection(label=field_name, bounding_box=bbox, value=str(value))
+                fol.Detection(label=label, bounding_box=bbox, value=str(value))
             )
+        return detections
+
+    for field_name, meta in extraction_metadata.items():
+        child_prefix = f"{prefix}.{field_name}" if prefix else field_name
+        detections.extend(_extraction_metadata_to_detections(meta, chunk_map, child_prefix))
+
     return detections

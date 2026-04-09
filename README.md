@@ -29,6 +29,10 @@ You can obtain an API key from the [Landing AI dashboard](https://va.landing.ai)
 export VISION_AGENT_API_KEY="your-api-key-here"
 ```
 
+If your organization has Zero Data Retention (ZDR) enabled, the plugin uses that
+account-level setting automatically. Password-protected parsing is supported
+through the optional **Document password** input on operators that parse files.
+
 ## Usage
 
 1. Launch the App with a dataset that contains documents or images:
@@ -74,10 +78,10 @@ the FiftyOne App grid and modal.
 |--------|-------------|---------|
 | Model | `dpt-2` (full, 3 credits/page) or `dpt-2-mini` (simple docs, 1.5 credits/page) | `dpt-2` |
 | Region | `us` or `eu` endpoint | `us` |
+| Document password | Password for password-protected files; requires a ZDR-enabled account | empty |
 | Output field (Markdown) | Field where the parsed Markdown text is stored | `ade_parse` |
 | Store spatial grounding | Store element bounding boxes as `fo.Detections` | `True` |
 | Output field (Grounding) | Field where grounding detections are stored | `ade_grounding` |
-| Zero data retention | Prevent Landing AI from retaining document data (+1 credit/page) | `False` |
 
 **What gets stored on each sample:**
 
@@ -85,7 +89,7 @@ the FiftyOne App grid and modal.
 |-------|------|---------|
 | `ade_parse` | `StringField` | Full parsed Markdown |
 | `ade_grounding` | `Detections` | One detection per document element with label (type), bounding box, `chunk_id`, and `page` |
-| `ade_parse_metadata` | `DictField` | `page_count`, `credit_usage`, `filename`, `duration_ms`, `model_version` |
+| `ade_parse_metadata` | `DictField` | `page_count`, `credit_usage`, `filename`, `duration_ms`, `version` |
 
 ---
 
@@ -114,7 +118,9 @@ credits again.
 | Option | Description | Default |
 |--------|-------------|---------|
 | Parse document first | Call Parse API before extracting | `True` |
+| Document password | Password for password-protected files when parsing first; requires a ZDR-enabled account | empty |
 | Save Markdown to field | Persist parsed Markdown for future runs (only when parsing first) | `ade_parse` |
+| Save grounding to field | Persist grounding detections from the parse step (only when parsing first) | `ade_grounding` |
 | Existing Markdown field | Field to read from when not parsing first | `ade_parse` |
 | Grounding field | Detection field used for bbox correlation when not parsing first | `ade_grounding` |
 | Model | Parse model (only used when parsing first) | `dpt-2` |
@@ -138,15 +144,16 @@ credits again.
 |-------|------|---------|
 | `ade_extraction_{field_name}` | `StringField` / `FloatField` / `BooleanField` | One field per schema entry, typed to match |
 | `ade_extraction_grounding` | `Detections` | Bounding boxes correlating each extracted value to its document location |
-| `ade_extraction_meta` | `DictField` | `credit_usage`, `schema_violation_error`, `model_version` |
+| `ade_extraction_meta` | `DictField` | `credit_usage`, `version`, `fallback_model_version`, `schema_violation_error`, `warnings` |
 
-When **Parse document first** is enabled and **Save Markdown to field** is non-empty, these additional fields are also written:
+When **Parse document first** is enabled, these additional fields are written if
+their save fields are non-empty:
 
 | Field | Type | Content |
 |-------|------|---------|
-| `ade_parse` | `StringField` | Parsed Markdown (reusable for future Extract or Split runs) |
-| `ade_parse_metadata` | `DictField` | `page_count`, `credit_usage`, `filename`, `duration_ms`, `model_version` |
-| `ade_grounding` | `Detections` | Grounding boxes for the parse chunks |
+| `Save Markdown to field` | `StringField` | Parsed Markdown (reusable for future Extract or Split runs) |
+| `{save_parse_field}_metadata` | `DictField` | `page_count`, `credit_usage`, `filename`, `duration_ms`, `version` |
+| `Save grounding to field` | `Detections` | Grounding boxes for the parse chunks |
 
 ---
 
@@ -170,11 +177,13 @@ contracts, and receipts) by providing a list of document types to look for.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| Parse document first | Call Parse API before splitting | `False` |
+| Parse document first | Call Parse API before splitting | `True` |
+| Document password | Password for password-protected files when parsing first; requires a ZDR-enabled account | empty |
 | Existing Markdown field | Field to read from when not parsing first | `ade_parse` |
 | Model | Parse model (only used when parsing first) | `dpt-2` |
+| Split model | Model version for the Split API | `split-latest` |
 | Region | `us` or `eu` endpoint | `us` |
-| Document types to classify | Form rows of `name` + `description` (max 19) | Invoice / Contract / Receipt |
+| Document types to classify | Form rows of `name` + `description` + optional `identifier` (max 19) | Invoice / Contract / Receipt |
 | Output field | Field where split results are stored | `ade_splits` |
 
 **What gets stored on each sample:**
@@ -184,7 +193,8 @@ contracts, and receipts) by providing a list of document types to look for.
 | `ade_splits` | `ListField` | List of `{classification, identifier, pages, page_count, markdown_preview}` per split |
 | `ade_splits_count` | `IntField` | Number of splits found |
 | `ade_splits_type` | `Classification` | Primary document type (first split's classification) |
-| `ade_splits_metadata` | `DictField` | `credit_usage`, `filename` |
+| `ade_splits_all_types` | `ListField` | Unique document types found across all splits |
+| `ade_splits_metadata` | `DictField` | `credit_usage`, `filename`, `page_count`, `duration_ms`, `job_id`, `version` |
 
 ---
 
@@ -202,8 +212,8 @@ contracts, and receipts) by providing a list of document types to look for.
 | Category | Extensions |
 |----------|-----------|
 | Documents | `.pdf` `.docx` `.doc` `.odt` |
-| Images | `.png` `.jpg` `.jpeg` `.bmp` `.tiff` `.tif` `.webp` `.gif` `.jp2` `.psd` |
-| Spreadsheets | `.xlsx` `.xls` `.csv` |
+| Images | `.png` `.jpg` `.jpeg` `.bmp` `.tiff` `.tif` `.webp` `.gif` `.apng` `.dcx` `.dds` `.dib` `.gd` `.icns` `.jp2` `.pcx` `.ppm` `.psd` `.tga` |
+| Spreadsheets | `.xlsx` `.csv` |
 | Presentations | `.ppt` `.pptx` |
 
 Samples with unsupported extensions are silently skipped.

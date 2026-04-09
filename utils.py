@@ -17,7 +17,7 @@ ADE_SUPPORTED_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp",
     ".gif", ".apng", ".dcx", ".dds", ".dib", ".gd", ".icns",
     ".jp2", ".pcx", ".ppm", ".psd", ".tga",
-    ".xlsx", ".xls", ".csv",
+    ".xlsx", ".csv",
     ".ppt", ".pptx",
 })
 
@@ -100,6 +100,33 @@ def grounding_to_detections(grounding: dict) -> Optional[fol.Detections]:
     return fol.Detections(detections=detections) if detections else None
 
 
+def to_plain_data(value):
+    """Convert SDK response objects into plain Python containers."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {str(k): to_plain_data(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [to_plain_data(v) for v in value]
+
+    if hasattr(value, "model_dump"):
+        return to_plain_data(value.model_dump())
+
+    if hasattr(value, "dict"):
+        return to_plain_data(value.dict())
+
+    if hasattr(value, "__dict__"):
+        return {
+            k: to_plain_data(v)
+            for k, v in vars(value).items()
+            if not k.startswith("_")
+        }
+
+    return str(value)
+
+
 def filter_ade_samples(view) -> list:
     """Return samples whose filepath has an ADE-supported extension."""
     return [
@@ -139,7 +166,7 @@ def add_model_input(inputs):
     """Add the model selector (dpt-2 vs dpt-2-mini)."""
     model_choices = types.RadioGroup()
     model_choices.add_choice("dpt-2", label="dpt-2  (Full featured — 3 credits/page)")
-    model_choices.add_choice("dpt-2-mini", label="dpt-2-mini  (Simple docs, faster — 1.5 credits/page)")
+    model_choices.add_choice("dpt-2-mini", label="dpt-2-mini  (Simple docs, preview — 1.5 credits/page)")
     inputs.enum(
         "model",
         values=model_choices.values(),
@@ -162,6 +189,33 @@ def add_extract_model_input(inputs):
         default="extract-latest",
         required=True,
         view=extract_choices,
+    )
+
+
+def add_split_model_input(inputs):
+    """Add the split model selector."""
+    split_choices = types.Dropdown()
+    split_choices.add_choice("split-latest", label="split-latest  (Latest split model)")
+    split_choices.add_choice("split-20251105", label="split-20251105  (Pinned snapshot)")
+    inputs.enum(
+        "split_model",
+        values=split_choices.values(),
+        label="Split model",
+        default="split-latest",
+        required=True,
+        view=split_choices,
+    )
+
+
+def add_password_input(inputs):
+    """Add an optional password input for encrypted documents."""
+    inputs.str(
+        "password",
+        label="Document password",
+        description=(
+            "Password for password-protected files. Requires a ZDR-enabled account. "
+            "Ignored for unencrypted documents."
+        ),
     )
 
 
