@@ -1,4 +1,4 @@
-"""Shared utilities for the Landing AI ADE FiftyOne plugin."""
+"""Shared utilities for the LandingAI ADE FiftyOne plugin."""
 
 import os
 from typing import Optional
@@ -23,7 +23,7 @@ ADE_SUPPORTED_EXTENSIONS = frozenset({
 
 
 def get_api_key(ctx) -> str:
-    """Resolve the Landing AI API key from FiftyOne secrets or environment.
+    """Resolve the LandingAI API key from FiftyOne secrets or environment.
 
     Priority: VISION_AGENT_API_KEY (secret → env) then LANDING_AI_API_KEY (secret → env).
     """
@@ -35,7 +35,7 @@ def get_api_key(ctx) -> str:
     )
     if not api_key:
         raise ValueError(
-            "No Landing AI API key found. "
+            "No LandingAI API key found. "
             "Set the VISION_AGENT_API_KEY environment variable or add it to FiftyOne secrets."
         )
     return api_key
@@ -45,7 +45,7 @@ def get_client(api_key: str, region: str = "us"):
     """Return an authenticated ``LandingAIADE`` client for the given region.
 
     Args:
-        api_key: Landing AI / Vision Agent API key.
+        api_key: LandingAI / Vision Agent API key.
         region: ``"us"`` (default) or ``"eu"``.
     """
     if _LandingAIADE is None:
@@ -152,7 +152,7 @@ def check_api_key(inputs, ctx) -> bool:
             "no_api_key_error",
             types.Notice(
                 label=(
-                    "Landing AI API key not found. "
+                    "LandingAI API key not found. "
                     "Set the VISION_AGENT_API_KEY environment variable and restart FiftyOne, "
                     "or add it to your FiftyOne secrets config."
                 )

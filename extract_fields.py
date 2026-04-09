@@ -1,4 +1,4 @@
-"""Schema-based field extraction operator for the Landing AI ADE FiftyOne plugin."""
+"""Schema-based field extraction operator for the LandingAI ADE FiftyOne plugin."""
 
 import json
 from pathlib import Path

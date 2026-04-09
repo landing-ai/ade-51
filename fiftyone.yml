@@ -1,13 +1,13 @@
 name: "@landingai/ade"
 type: plugin
-label: Landing AI ADE
+label: LandingAI ADE
 description: >
-  Parse, extract, and split documents using Landing AI Agentic Document Extraction (ADE).
+  Parse, extract, and split documents using LandingAI Agentic Document Extraction (ADE).
   Converts PDFs, images, spreadsheets, and Office files into structured Markdown with
   spatial bounding box grounding. Supports schema-based field extraction and
   multi-document splitting/classification.
 version: 0.1.1
-author: Landing AI
+author: LandingAI
 license: Apache-2.0
 url: https://github.com/landing-ai/ade-51
 

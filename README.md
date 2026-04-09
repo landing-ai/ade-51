@@ -1,9 +1,9 @@
-# Landing AI ADE Plugin
+# LandingAI ADE Plugin
 
 [ai_landing.webm](https://github.com/user-attachments/assets/9b17a479-0e8e-4b0a-a21c-733c45cf35ac)
 
 A FiftyOne plugin that provides operators for parsing, extracting, and splitting
-documents using [Landing AI](https://landing.ai)'s Agentic Document Extraction
+documents using [LandingAI](https://landing.ai)'s Agentic Document Extraction
 (ADE) API. Converts PDFs, images, spreadsheets, and Office files into structured
 Markdown with spatial bounding box grounding stored as native FiftyOne `Detections`.
 
@@ -21,9 +21,9 @@ fiftyone plugins requirements @landingai/ade --install
 
 ## Configuration
 
-Set your Landing AI API key as the `VISION_AGENT_API_KEY` environment variable
+Set your LandingAI API key as the `VISION_AGENT_API_KEY` environment variable
 or add it to [FiftyOne secrets](https://docs.voxel51.com/plugins/using_plugins.html#secrets).
-You can obtain an API key from the [Landing AI dashboard](https://va.landing.ai).
+You can obtain an API key from the [LandingAI dashboard](https://va.landing.ai).
 
 ```shell
 export VISION_AGENT_API_KEY="your-api-key-here"

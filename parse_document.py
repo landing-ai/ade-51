@@ -1,4 +1,4 @@
-"""Synchronous document parse operator for the Landing AI ADE FiftyOne plugin."""
+"""Synchronous document parse operator for the LandingAI ADE FiftyOne plugin."""
 
 from pathlib import Path
 
@@ -43,7 +43,7 @@ class ADEParseDocument(foo.Operator):
             label="ADE: Parse Document",
             description=(
                 "Convert selected documents to structured Markdown with spatial "
-                "grounding using Landing AI ADE."
+                "grounding using LandingAI ADE."
             ),
             dynamic=True,
             allow_immediate_execution=True,

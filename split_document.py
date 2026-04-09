@@ -1,4 +1,4 @@
-"""Document splitting/classification operator for the Landing AI ADE FiftyOne plugin."""
+"""Document splitting/classification operator for the LandingAI ADE FiftyOne plugin."""
 
 from pathlib import Path
 
@@ -40,7 +40,7 @@ _DEFAULT_SPLIT_CLASSES = [
 class ADESplitDocument(foo.Operator):
     """Classify and split multi-document files by document type.
 
-    Uses the Landing AI ADE Split API to identify and separate bundled documents
+    Uses the LandingAI ADE Split API to identify and separate bundled documents
     (e.g. a PDF containing invoices, contracts, and receipts). Results are stored
     as a list of split summaries on each sample.
 
@@ -55,7 +55,7 @@ class ADESplitDocument(foo.Operator):
             label="ADE: Split / Classify Document",
             description=(
                 "Classify and split multi-document files by type using the "
-                "Landing AI ADE Split API. NOTE: Split API is currently in preview."
+                "LandingAI ADE Split API. NOTE: Split API is currently in preview."
             ),
             dynamic=True,
             allow_immediate_execution=True,
