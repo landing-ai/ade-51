@@ -29,6 +29,16 @@ You can obtain an API key from the [LandingAI dashboard](https://va.landing.ai).
 export VISION_AGENT_API_KEY="your-api-key-here"
 ```
 
+If you keep credentials in a `.env` file, launch FiftyOne from that directory and
+set:
+
+```shell
+VISION_AGENT_API_KEY="your-api-key-here"
+```
+
+For compatibility, the plugin also accepts `LANDINGAI_API_KEY` and
+`LANDING_AI_API_KEY`, but `VISION_AGENT_API_KEY` matches the current LandingAI docs.
+
 If your organization has Zero Data Retention (ZDR) enabled, the plugin uses that
 account-level setting automatically. Password-protected parsing is supported
 through the optional **Document password** input on operators that parse files.

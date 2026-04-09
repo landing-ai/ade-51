@@ -1,7 +1,9 @@
 """Document splitting/classification operator for the LandingAI ADE FiftyOne plugin."""
 
+import json
 from pathlib import Path
 
+import fiftyone.core.fields as fof
 import fiftyone.core.labels as fol
 import fiftyone.operators as foo
 import fiftyone.operators.types as types
@@ -35,6 +37,32 @@ _DEFAULT_SPLIT_CLASSES = [
     {"name": "Contract", "description": "A legal agreement between two or more parties"},
     {"name": "Receipt",  "description": "Proof of payment for a transaction"},
 ]
+
+
+def _is_classification_field(field) -> bool:
+    return (
+        isinstance(field, fof.EmbeddedDocumentField)
+        and getattr(field, "document_type", None) is not None
+        and issubclass(field.document_type, fol.Classification)
+    )
+
+
+def _ensure_split_output_fields(dataset, result_field: str):
+    """Predeclare split output fields so empty responses remain storable."""
+    if dataset.get_field(result_field) is None:
+        dataset.add_sample_field(result_field, fof.ListField)
+    if dataset.get_field(f"{result_field}_count") is None:
+        dataset.add_sample_field(f"{result_field}_count", fof.IntField)
+    if dataset.get_field(f"{result_field}_type") is None:
+        dataset.add_sample_field(
+            f"{result_field}_type",
+            fof.EmbeddedDocumentField,
+            embedded_doc_type=fol.Classification,
+        )
+    if dataset.get_field(f"{result_field}_all_types") is None:
+        dataset.add_sample_field(f"{result_field}_all_types", fof.ListField)
+    if dataset.get_field(f"{result_field}_metadata") is None:
+        dataset.add_sample_field(f"{result_field}_metadata", fof.DictField)
 
 
 class ADESplitDocument(foo.Operator):
@@ -194,6 +222,53 @@ class ADESplitDocument(foo.Operator):
             )
             return {"processed": 0, "total": 0, "errors": [], "message": msg}
 
+        conflicting_fields = []
+        existing_splits_field = ctx.dataset.get_field(result_field)
+        if existing_splits_field is not None and not isinstance(existing_splits_field, fof.ListField):
+            conflicting_fields.append(
+                f"{result_field} ({existing_splits_field.__class__.__name__} vs ListField)"
+            )
+
+        existing_count_field = ctx.dataset.get_field(f"{result_field}_count")
+        if existing_count_field is not None and not isinstance(existing_count_field, fof.IntField):
+            conflicting_fields.append(
+                f"{result_field}_count ({existing_count_field.__class__.__name__} vs IntField)"
+            )
+
+        existing_type_field = ctx.dataset.get_field(f"{result_field}_type")
+        if existing_type_field is not None and not _is_classification_field(existing_type_field):
+            conflicting_fields.append(
+                f"{result_field}_type ({existing_type_field.__class__.__name__} vs Classification)"
+            )
+
+        existing_all_types_field = ctx.dataset.get_field(f"{result_field}_all_types")
+        if existing_all_types_field is not None and not isinstance(existing_all_types_field, fof.ListField):
+            conflicting_fields.append(
+                f"{result_field}_all_types ({existing_all_types_field.__class__.__name__} vs ListField)"
+            )
+
+        existing_metadata_field = ctx.dataset.get_field(f"{result_field}_metadata")
+        if existing_metadata_field is not None and not isinstance(existing_metadata_field, fof.DictField):
+            conflicting_fields.append(
+                f"{result_field}_metadata ({existing_metadata_field.__class__.__name__} vs DictField)"
+            )
+
+        if conflicting_fields:
+            preview = ", ".join(conflicting_fields[:3])
+            if len(conflicting_fields) > 3:
+                preview += f", and {len(conflicting_fields) - 3} more"
+            return {
+                "error": (
+                    "Output fields already exist with incompatible FiftyOne types. "
+                    "Choose a new output field or delete the conflicting fields first: "
+                    f"{preview}"
+                ),
+                "processed": 0,
+                "total": total,
+            }
+
+        _ensure_split_output_fields(ctx.dataset, result_field)
+
         processed = 0
         errors = []
         all_classifications = []
@@ -218,7 +293,7 @@ class ADESplitDocument(foo.Operator):
                         continue
 
                 split_resp = client.split(
-                    split_class=split_classes,
+                    split_class=json.dumps(split_classes),
                     markdown=markdown_content,
                     model=split_model,
                 )

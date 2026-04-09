@@ -1,6 +1,8 @@
 """Shared utilities for the LandingAI ADE FiftyOne plugin."""
 
 import os
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import fiftyone.core.labels as fol
@@ -21,22 +23,81 @@ ADE_SUPPORTED_EXTENSIONS = frozenset({
     ".ppt", ".pptx",
 })
 
+_API_KEY_NAMES = (
+    "VISION_AGENT_API_KEY",
+    "LANDINGAI_API_KEY",
+    "LANDING_AI_API_KEY",
+)
+
+
+@lru_cache(maxsize=1)
+def _read_dotenv_values() -> dict:
+    """Read API-key entries from ``.env`` in the current working directory."""
+    env_path = Path.cwd() / ".env"
+    if not env_path.is_file():
+        return {}
+
+    values = {}
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            if key not in _API_KEY_NAMES:
+                continue
+
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            if value:
+                values[key] = value
+    except OSError:
+        return {}
+
+    return values
+
+
+def _resolve_api_key(ctx) -> Optional[str]:
+    """Resolve the API key from FiftyOne secrets, environment, or ``.env``."""
+    secrets = getattr(ctx, "secrets", {}) or {}
+    for name in _API_KEY_NAMES:
+        value = secrets.get(name)
+        if value:
+            return value
+
+    for name in _API_KEY_NAMES:
+        value = os.getenv(name)
+        if value:
+            return value
+
+    dotenv_values = _read_dotenv_values()
+    for name in _API_KEY_NAMES:
+        value = dotenv_values.get(name)
+        if value:
+            return value
+
+    return None
+
 
 def get_api_key(ctx) -> str:
     """Resolve the LandingAI API key from FiftyOne secrets or environment.
 
-    Priority: VISION_AGENT_API_KEY (secret → env) then LANDING_AI_API_KEY (secret → env).
+    Priority: FiftyOne secrets, then environment variables, then ``.env`` in the
+    current working directory. ``VISION_AGENT_API_KEY`` matches current LandingAI
+    docs; ``LANDINGAI_API_KEY`` and ``LANDING_AI_API_KEY`` are accepted as
+    compatibility aliases.
     """
-    api_key = (
-        ctx.secrets.get("VISION_AGENT_API_KEY")
-        or os.getenv("VISION_AGENT_API_KEY")
-        or ctx.secrets.get("LANDING_AI_API_KEY")
-        or os.getenv("LANDING_AI_API_KEY")
-    )
+    api_key = _resolve_api_key(ctx)
     if not api_key:
         raise ValueError(
             "No LandingAI API key found. "
-            "Set the VISION_AGENT_API_KEY environment variable or add it to FiftyOne secrets."
+            "Set VISION_AGENT_API_KEY in your environment or .env file, "
+            "or add it to FiftyOne secrets."
         )
     return api_key
 
@@ -141,19 +202,14 @@ def check_api_key(inputs, ctx) -> bool:
     Call at the top of ``resolve_input``. If it returns ``False``, return
     ``types.Property(inputs, invalid=True)`` immediately.
     """
-    key = (
-        ctx.secrets.get("VISION_AGENT_API_KEY")
-        or os.getenv("VISION_AGENT_API_KEY")
-        or ctx.secrets.get("LANDING_AI_API_KEY")
-        or os.getenv("LANDING_AI_API_KEY")
-    )
+    key = _resolve_api_key(ctx)
     if not key:
         inputs.view(
             "no_api_key_error",
             types.Notice(
                 label=(
                     "LandingAI API key not found. "
-                    "Set the VISION_AGENT_API_KEY environment variable and restart FiftyOne, "
+                    "Set VISION_AGENT_API_KEY in your environment or .env file and restart FiftyOne, "
                     "or add it to your FiftyOne secrets config."
                 )
             ),

@@ -54,6 +54,35 @@ _FO_TYPE_MAP = {
 }
 
 
+def _is_detections_field(field) -> bool:
+    return (
+        isinstance(field, fof.EmbeddedDocumentField)
+        and getattr(field, "document_type", None) is not None
+        and issubclass(field.document_type, fol.Detections)
+    )
+
+
+def _ensure_extract_output_fields(dataset, result_field: str, properties: dict):
+    """Predeclare extract output fields so ``None`` assignments are valid."""
+    for key, props in properties.items():
+        field_name = f"{result_field}_{key}"
+        field_type = _FO_TYPE_MAP.get(props.get("type", "string"), fof.StringField)
+        if dataset.get_field(field_name) is None:
+            dataset.add_sample_field(field_name, field_type)
+
+    grounding_field = f"{result_field}_grounding"
+    if dataset.get_field(grounding_field) is None:
+        dataset.add_sample_field(
+            grounding_field,
+            fof.EmbeddedDocumentField,
+            embedded_doc_type=fol.Detections,
+        )
+
+    meta_field = f"{result_field}_meta"
+    if dataset.get_field(meta_field) is None:
+        dataset.add_sample_field(meta_field, fof.DictField)
+
+
 def _build_field_type_dropdown():
     d = types.Dropdown()
     d.add_choice("string",  label="Text (string)")
@@ -280,6 +309,18 @@ class ADEExtractFields(foo.Operator):
                     f"{field_name} ({existing_field.__class__.__name__} vs {expected_type.__name__})"
                 )
 
+        grounding_output_field = ctx.dataset.get_field(f"{result_field}_grounding")
+        if grounding_output_field is not None and not _is_detections_field(grounding_output_field):
+            conflicting_fields.append(
+                f"{result_field}_grounding ({grounding_output_field.__class__.__name__} vs Detections)"
+            )
+
+        meta_output_field = ctx.dataset.get_field(f"{result_field}_meta")
+        if meta_output_field is not None and not isinstance(meta_output_field, fof.DictField):
+            conflicting_fields.append(
+                f"{result_field}_meta ({meta_output_field.__class__.__name__} vs DictField)"
+            )
+
         if conflicting_fields:
             preview = ", ".join(conflicting_fields[:3])
             if len(conflicting_fields) > 3:
@@ -293,6 +334,8 @@ class ADEExtractFields(foo.Operator):
                 "processed": 0,
                 "total": 0,
             }
+
+        _ensure_extract_output_fields(ctx.dataset, result_field, properties)
 
         client = get_client(api_key, region)
 
