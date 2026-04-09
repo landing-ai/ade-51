@@ -9,7 +9,7 @@ description: >
 version: 0.1.0
 author: Landing AI
 license: Apache-2.0
-url: https://github.com/landing-ai/fiftyone-landingai-ade
+url: https://github.com/landing-ai/ade-51
 
 tags:
   - document-analysis

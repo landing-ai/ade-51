@@ -10,7 +10,7 @@ Markdown with spatial bounding box grounding stored as native FiftyOne `Detectio
 ## Installation
 
 ```shell
-fiftyone plugins download https://github.com/landing-ai/computable-docs
+fiftyone plugins download https://github.com/landing-ai/ade-51
 ```
 
 Install the required dependencies:
@@ -118,6 +118,7 @@ credits again.
 | Existing Markdown field | Field to read from when not parsing first | `ade_parse` |
 | Grounding field | Detection field used for bbox correlation when not parsing first | `ade_grounding` |
 | Model | Parse model (only used when parsing first) | `dpt-2` |
+| Extraction model | Model version for the Extract API | `extract-latest` |
 | Region | `us` or `eu` endpoint | `us` |
 | Fields to extract | Form rows of `name` + `description` + `type` | Invoice example fields |
 | Output field prefix | Prefix for all stored fields | `ade_extraction` |
