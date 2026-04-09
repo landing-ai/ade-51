@@ -92,7 +92,7 @@ class ADEParseDocument(foo.Operator):
     def execute(self, ctx):
         api_key = get_api_key(ctx)
         region = ctx.params.get("region", "us")
-        model = ctx.params.get("model", "dpt-2")
+        model = ctx.params.get("model", "dpt-2-latest")
         password = (ctx.params.get("password") or "").strip()
         result_field = ctx.params.get("result_field", "ade_parse")
         store_grounding = ctx.params.get("store_grounding", True)

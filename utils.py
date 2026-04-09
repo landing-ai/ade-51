@@ -23,21 +23,16 @@ ADE_SUPPORTED_EXTENSIONS = frozenset({
     ".ppt", ".pptx",
 })
 
-_API_KEY_NAMES = (
-    "VISION_AGENT_API_KEY",
-    "LANDINGAI_API_KEY",
-    "LANDING_AI_API_KEY",
-)
+_API_KEY_NAME = "VISION_AGENT_API_KEY"
 
 
 @lru_cache(maxsize=1)
-def _read_dotenv_values() -> dict:
-    """Read API-key entries from ``.env`` in the current working directory."""
+def _read_dotenv_api_key() -> Optional[str]:
+    """Read ``VISION_AGENT_API_KEY`` from ``.env`` in the current directory."""
     env_path = Path.cwd() / ".env"
     if not env_path.is_file():
-        return {}
+        return None
 
-    values = {}
     try:
         for raw_line in env_path.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
@@ -48,49 +43,35 @@ def _read_dotenv_values() -> dict:
             key = key.strip()
             if key.startswith("export "):
                 key = key[len("export "):].strip()
-            if key not in _API_KEY_NAMES:
+            if key != _API_KEY_NAME:
                 continue
 
             value = value.strip()
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
             if value:
-                values[key] = value
+                return value
     except OSError:
-        return {}
+        return None
 
-    return values
+    return None
 
 
 def _resolve_api_key(ctx) -> Optional[str]:
-    """Resolve the API key from FiftyOne secrets, environment, or ``.env``."""
+    """Resolve ``VISION_AGENT_API_KEY`` from secrets, env, or ``.env``."""
     secrets = getattr(ctx, "secrets", {}) or {}
-    for name in _API_KEY_NAMES:
-        value = secrets.get(name)
-        if value:
-            return value
-
-    for name in _API_KEY_NAMES:
-        value = os.getenv(name)
-        if value:
-            return value
-
-    dotenv_values = _read_dotenv_values()
-    for name in _API_KEY_NAMES:
-        value = dotenv_values.get(name)
-        if value:
-            return value
-
-    return None
+    return (
+        secrets.get(_API_KEY_NAME)
+        or os.getenv(_API_KEY_NAME)
+        or _read_dotenv_api_key()
+    )
 
 
 def get_api_key(ctx) -> str:
     """Resolve the LandingAI API key from FiftyOne secrets or environment.
 
     Priority: FiftyOne secrets, then environment variables, then ``.env`` in the
-    current working directory. ``VISION_AGENT_API_KEY`` matches current LandingAI
-    docs; ``LANDINGAI_API_KEY`` and ``LANDING_AI_API_KEY`` are accepted as
-    compatibility aliases.
+    current working directory. The plugin uses ``VISION_AGENT_API_KEY`` only.
     """
     api_key = _resolve_api_key(ctx)
     if not api_key:
@@ -219,15 +200,21 @@ def check_api_key(inputs, ctx) -> bool:
 
 
 def add_model_input(inputs):
-    """Add the model selector (dpt-2 vs dpt-2-mini)."""
+    """Add the parse model selector using the docs-style latest aliases."""
     model_choices = types.RadioGroup()
-    model_choices.add_choice("dpt-2", label="dpt-2  (Full featured — 3 credits/page)")
-    model_choices.add_choice("dpt-2-mini", label="dpt-2-mini  (Simple docs, preview — 1.5 credits/page)")
+    model_choices.add_choice(
+        "dpt-2-latest",
+        label="dpt-2-latest  (Full featured — 3 credits/page)",
+    )
+    model_choices.add_choice(
+        "dpt-2-mini-latest",
+        label="dpt-2-mini-latest  (Simple docs, preview — 1.5 credits/page)",
+    )
     inputs.enum(
         "model",
         values=model_choices.values(),
         label="Model",
-        default="dpt-2",
+        default="dpt-2-latest",
         required=True,
         view=model_choices,
     )

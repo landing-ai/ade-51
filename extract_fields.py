@@ -270,7 +270,7 @@ class ADEExtractFields(foo.Operator):
         api_key = get_api_key(ctx)
         region = ctx.params.get("region", "us")
         parse_first = ctx.params.get("parse_first", True)
-        model = ctx.params.get("model", "dpt-2")
+        model = ctx.params.get("model", "dpt-2-latest")
         password = (ctx.params.get("password") or "").strip()
         parse_field = ctx.params.get("parse_field", "ade_parse")
         save_parse_field = (ctx.params.get("save_parse_field") or "").strip()

@@ -6,7 +6,7 @@ description: >
   Converts PDFs, images, spreadsheets, and Office files into structured Markdown with
   spatial bounding box grounding. Supports schema-based field extraction and
   multi-document splitting/classification.
-version: 0.1.2
+version: 0.1.3
 author: LandingAI
 license: Apache-2.0
 url: https://github.com/landing-ai/ade-51

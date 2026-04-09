@@ -36,9 +36,6 @@ set:
 VISION_AGENT_API_KEY="your-api-key-here"
 ```
 
-For compatibility, the plugin also accepts `LANDINGAI_API_KEY` and
-`LANDING_AI_API_KEY`, but `VISION_AGENT_API_KEY` matches the current LandingAI docs.
-
 If your organization has Zero Data Retention (ZDR) enabled, the plugin uses that
 account-level setting automatically. Password-protected parsing is supported
 through the optional **Document password** input on operators that parse files.
@@ -86,7 +83,7 @@ the FiftyOne App grid and modal.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| Model | `dpt-2` (full, 3 credits/page) or `dpt-2-mini` (simple docs, 1.5 credits/page) | `dpt-2` |
+| Model | `dpt-2-latest` (full, 3 credits/page) or `dpt-2-mini-latest` (simple docs, 1.5 credits/page) | `dpt-2-latest` |
 | Region | `us` or `eu` endpoint | `us` |
 | Document password | Password for password-protected files; requires a ZDR-enabled account | empty |
 | Output field (Markdown) | Field where the parsed Markdown text is stored | `ade_parse` |
@@ -133,7 +130,7 @@ credits again.
 | Save grounding to field | Persist grounding detections from the parse step (only when parsing first) | `ade_grounding` |
 | Existing Markdown field | Field to read from when not parsing first | `ade_parse` |
 | Grounding field | Detection field used for bbox correlation when not parsing first | `ade_grounding` |
-| Model | Parse model (only used when parsing first) | `dpt-2` |
+| Model | Parse model (only used when parsing first) | `dpt-2-latest` |
 | Extraction model | Model version for the Extract API | `extract-latest` |
 | Region | `us` or `eu` endpoint | `us` |
 | Fields to extract | Form rows of `name` + `description` + `type` | Invoice example fields |
@@ -190,7 +187,7 @@ contracts, and receipts) by providing a list of document types to look for.
 | Parse document first | Call Parse API before splitting | `True` |
 | Document password | Password for password-protected files when parsing first; requires a ZDR-enabled account | empty |
 | Existing Markdown field | Field to read from when not parsing first | `ade_parse` |
-| Model | Parse model (only used when parsing first) | `dpt-2` |
+| Model | Parse model (only used when parsing first) | `dpt-2-latest` |
 | Split model | Model version for the Split API | `split-latest` |
 | Region | `us` or `eu` endpoint | `us` |
 | Document types to classify | Form rows of `name` + `description` + optional `identifier` (max 19) | Invoice / Contract / Receipt |
@@ -212,8 +209,8 @@ contracts, and receipts) by providing a list of document types to look for.
 
 | Model | Credits/page | Best for |
 |-------|-------------|----------|
-| `dpt-2` | 3 | Complex docs, scanned PDFs, tables, non-English, figures |
-| `dpt-2-mini` | 1.5 | Simple digital docs, invoices, forms; not for scanned or complex tables |
+| `dpt-2-latest` | 3 | Complex docs, scanned PDFs, tables, non-English, figures |
+| `dpt-2-mini-latest` | 1.5 | Simple digital docs, invoices, forms; not for scanned or complex tables |
 
 ---
 
