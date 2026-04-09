@@ -1,8 +1,9 @@
-"""Document splitting/classification operator for the Landing AI ADE FiftyOne plugin."""
+"""Document splitting/classification operator for the LandingAI ADE FiftyOne plugin."""
 
 import json
 from pathlib import Path
 
+import fiftyone.core.fields as fof
 import fiftyone.core.labels as fol
 import fiftyone.operators as foo
 import fiftyone.operators.types as types
@@ -10,7 +11,9 @@ import fiftyone.operators.types as types
 try:
     from .utils import (
         add_model_input,
+        add_password_input,
         add_region_input,
+        add_split_model_input,
         check_api_key,
         filter_ade_samples,
         get_api_key,
@@ -19,7 +22,9 @@ try:
 except ImportError:
     from utils import (
         add_model_input,
+        add_password_input,
         add_region_input,
+        add_split_model_input,
         check_api_key,
         filter_ade_samples,
         get_api_key,
@@ -34,10 +39,36 @@ _DEFAULT_SPLIT_CLASSES = [
 ]
 
 
+def _is_classification_field(field) -> bool:
+    return (
+        isinstance(field, fof.EmbeddedDocumentField)
+        and getattr(field, "document_type", None) is not None
+        and issubclass(field.document_type, fol.Classification)
+    )
+
+
+def _ensure_split_output_fields(dataset, result_field: str):
+    """Predeclare split output fields so empty responses remain storable."""
+    if dataset.get_field(result_field) is None:
+        dataset.add_sample_field(result_field, fof.ListField)
+    if dataset.get_field(f"{result_field}_count") is None:
+        dataset.add_sample_field(f"{result_field}_count", fof.IntField)
+    if dataset.get_field(f"{result_field}_type") is None:
+        dataset.add_sample_field(
+            f"{result_field}_type",
+            fof.EmbeddedDocumentField,
+            embedded_doc_type=fol.Classification,
+        )
+    if dataset.get_field(f"{result_field}_all_types") is None:
+        dataset.add_sample_field(f"{result_field}_all_types", fof.ListField)
+    if dataset.get_field(f"{result_field}_metadata") is None:
+        dataset.add_sample_field(f"{result_field}_metadata", fof.DictField)
+
+
 class ADESplitDocument(foo.Operator):
     """Classify and split multi-document files by document type.
 
-    Uses the Landing AI ADE Split API to identify and separate bundled documents
+    Uses the LandingAI ADE Split API to identify and separate bundled documents
     (e.g. a PDF containing invoices, contracts, and receipts). Results are stored
     as a list of split summaries on each sample.
 
@@ -52,7 +83,7 @@ class ADESplitDocument(foo.Operator):
             label="ADE: Split / Classify Document",
             description=(
                 "Classify and split multi-document files by type using the "
-                "Landing AI ADE Split API. NOTE: Split API is currently in preview."
+                "LandingAI ADE Split API. NOTE: Split API is currently in preview."
             ),
             dynamic=True,
             allow_immediate_execution=True,
@@ -90,6 +121,7 @@ class ADESplitDocument(foo.Operator):
 
         if ctx.params.get("parse_first", True):
             add_model_input(inputs)
+            add_password_input(inputs)
         else:
             inputs.str(
                 "parse_field",
@@ -98,6 +130,8 @@ class ADESplitDocument(foo.Operator):
                 default="ade_parse",
                 required=True,
             )
+
+        add_split_model_input(inputs)
 
         class_schema = types.Object()
         class_schema.str(
@@ -112,12 +146,20 @@ class ADESplitDocument(foo.Operator):
             description="Help the model understand what this document type looks like.",
             required=True,
         )
+        class_schema.str(
+            "identifier",
+            label="Identifier field",
+            description=(
+                "Optional field to distinguish multiple documents of the same type "
+                '(e.g. "invoice_number" or "statement_date").'
+            ),
+        )
 
         inputs.list(
             "split_classes",
             class_schema,
             label="Document types to classify",
-            description="Add one row per type. Maximum 19 classes per call.",
+            description="Add one row per type. You can optionally define an identifier. Maximum 19 classes per call.",
             default=_DEFAULT_SPLIT_CLASSES,
         )
 
@@ -134,13 +176,30 @@ class ADESplitDocument(foo.Operator):
     def execute(self, ctx):
         api_key = get_api_key(ctx)
         region = ctx.params.get("region", "us")
-        parse_first = ctx.params.get("parse_first", False)
-        model = ctx.params.get("model", "dpt-2")
+        parse_first = ctx.params.get("parse_first", True)
+        model = ctx.params.get("model", "dpt-2-latest")
+        password = (ctx.params.get("password") or "").strip()
         parse_field = ctx.params.get("parse_field", "ade_parse")
+        split_model = ctx.params.get("split_model", "split-latest")
         result_field = ctx.params.get("result_field", "ade_splits")
-        split_classes = ctx.params.get("split_classes") or _DEFAULT_SPLIT_CLASSES
+        raw_split_classes = ctx.params.get("split_classes") or _DEFAULT_SPLIT_CLASSES
 
-        split_classes = [c for c in split_classes if (c.get("name") or "").strip()]
+        split_classes = []
+        for c in raw_split_classes:
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+
+            entry = {
+                "name": name,
+                "description": (c.get("description") or "").strip(),
+            }
+            identifier = (c.get("identifier") or "").strip()
+            if identifier:
+                entry["identifier"] = identifier
+
+            split_classes.append(entry)
+
         if not split_classes:
             return {"error": "No document types defined. Add at least one class.", "processed": 0, "total": 0}
         if len(split_classes) > 19:
@@ -163,7 +222,53 @@ class ADESplitDocument(foo.Operator):
             )
             return {"processed": 0, "total": 0, "errors": [], "message": msg}
 
-        split_class_payload = json.dumps(split_classes)
+        conflicting_fields = []
+        existing_splits_field = ctx.dataset.get_field(result_field)
+        if existing_splits_field is not None and not isinstance(existing_splits_field, fof.ListField):
+            conflicting_fields.append(
+                f"{result_field} ({existing_splits_field.__class__.__name__} vs ListField)"
+            )
+
+        existing_count_field = ctx.dataset.get_field(f"{result_field}_count")
+        if existing_count_field is not None and not isinstance(existing_count_field, fof.IntField):
+            conflicting_fields.append(
+                f"{result_field}_count ({existing_count_field.__class__.__name__} vs IntField)"
+            )
+
+        existing_type_field = ctx.dataset.get_field(f"{result_field}_type")
+        if existing_type_field is not None and not _is_classification_field(existing_type_field):
+            conflicting_fields.append(
+                f"{result_field}_type ({existing_type_field.__class__.__name__} vs Classification)"
+            )
+
+        existing_all_types_field = ctx.dataset.get_field(f"{result_field}_all_types")
+        if existing_all_types_field is not None and not isinstance(existing_all_types_field, fof.ListField):
+            conflicting_fields.append(
+                f"{result_field}_all_types ({existing_all_types_field.__class__.__name__} vs ListField)"
+            )
+
+        existing_metadata_field = ctx.dataset.get_field(f"{result_field}_metadata")
+        if existing_metadata_field is not None and not isinstance(existing_metadata_field, fof.DictField):
+            conflicting_fields.append(
+                f"{result_field}_metadata ({existing_metadata_field.__class__.__name__} vs DictField)"
+            )
+
+        if conflicting_fields:
+            preview = ", ".join(conflicting_fields[:3])
+            if len(conflicting_fields) > 3:
+                preview += f", and {len(conflicting_fields) - 3} more"
+            return {
+                "error": (
+                    "Output fields already exist with incompatible FiftyOne types. "
+                    "Choose a new output field or delete the conflicting fields first: "
+                    f"{preview}"
+                ),
+                "processed": 0,
+                "total": total,
+            }
+
+        _ensure_split_output_fields(ctx.dataset, result_field)
+
         processed = 0
         errors = []
         all_classifications = []
@@ -172,7 +277,11 @@ class ADESplitDocument(foo.Operator):
             ctx.set_progress(progress=i / total, label=f"Splitting: {i + 1}/{total}…")
             try:
                 if parse_first:
-                    parse_resp = client.parse(document=Path(sample.filepath), model=model)
+                    parse_kwargs = {"document": Path(sample.filepath), "model": model}
+                    if password:
+                        parse_kwargs["password"] = password
+
+                    parse_resp = client.parse(**parse_kwargs)
                     markdown_content = parse_resp.markdown
                 else:
                     markdown_content = sample.get_field(parse_field)
@@ -183,10 +292,16 @@ class ADESplitDocument(foo.Operator):
                         })
                         continue
 
-                split_resp = client.split(split_class=split_class_payload, markdown=markdown_content)
+                split_resp = client.split(
+                    split_class=json.dumps(split_classes),
+                    markdown=markdown_content,
+                    model=split_model,
+                )
+                split_version = getattr(split_resp.metadata, "version", None)
+                splits = list(split_resp.splits or [])
 
                 splits_summary = []
-                for s in split_resp.splits:
+                for s in splits:
                     splits_summary.append({
                         "classification": s.classification,
                         "identifier": getattr(s, "identifier", None),
@@ -197,18 +312,23 @@ class ADESplitDocument(foo.Operator):
                     all_classifications.append(s.classification)
 
                 sample[result_field] = splits_summary
-                sample[f"{result_field}_count"] = len(split_resp.splits)
-                # Store primary type (first split) for quick filtering
-                sample[f"{result_field}_type"] = fol.Classification(
-                    label=split_resp.splits[0].classification
+                sample[f"{result_field}_count"] = len(splits)
+                sample[f"{result_field}_type"] = (
+                    fol.Classification(label=splits[0].classification)
+                    if splits
+                    else None
                 )
-                # Store all types found for multi-type documents
-                sample[f"{result_field}_all_types"] = list({
-                    s.classification for s in split_resp.splits
+                sample[f"{result_field}_all_types"] = sorted({
+                    s.classification for s in splits
                 })
                 sample[f"{result_field}_metadata"] = {
                     "credit_usage": float(getattr(split_resp.metadata, "credit_usage", 0) or 0),
                     "filename": getattr(split_resp.metadata, "filename", None),
+                    "page_count": getattr(split_resp.metadata, "page_count", None),
+                    "duration_ms": getattr(split_resp.metadata, "duration_ms", None),
+                    "job_id": getattr(split_resp.metadata, "job_id", None),
+                    "version": split_version,
+                    "model_version": split_version,
                 }
 
                 sample.save()
@@ -223,6 +343,7 @@ class ADESplitDocument(foo.Operator):
             "processed": processed,
             "total": total,
             "errors": errors[:5],
+            "error_count": len(errors),
             "result_field": result_field,
             "unique_classifications": sorted(set(all_classifications)),
         }
@@ -234,6 +355,7 @@ class ADESplitDocument(foo.Operator):
         processed = result.get("processed", 0)
         total = result.get("total", 0)
         errors = result.get("errors", [])
+        error_count = result.get("error_count", len(errors))
         result_field = result.get("result_field", "ade_splits")
         unique_classifications = result.get("unique_classifications", [])
         message = result.get("message", "")
@@ -250,8 +372,8 @@ class ADESplitDocument(foo.Operator):
         summary = f"Processed {processed}/{total} samples. Split results stored in '{result_field}'."
         if unique_classifications:
             summary += f" Types found: {', '.join(unique_classifications)}."
-        if errors:
-            summary += f" {len(errors)} error(s) — see below."
+        if error_count:
+            summary += f" {error_count} error(s) — see below."
 
         outputs.view("summary", types.Notice(label=summary))
 
