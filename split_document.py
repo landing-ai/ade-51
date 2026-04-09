@@ -85,10 +85,10 @@ class ADESplitDocument(foo.Operator):
                 "Parse each document before splitting. "
                 "Disable if Markdown is already stored in a dataset field."
             ),
-            default=False,
+            default=True,
         )
 
-        if ctx.params.get("parse_first", False):
+        if ctx.params.get("parse_first", True):
             add_model_input(inputs)
         else:
             inputs.str(
@@ -198,9 +198,14 @@ class ADESplitDocument(foo.Operator):
 
                 sample[result_field] = splits_summary
                 sample[f"{result_field}_count"] = len(split_resp.splits)
+                # Store primary type (first split) for quick filtering
                 sample[f"{result_field}_type"] = fol.Classification(
                     label=split_resp.splits[0].classification
                 )
+                # Store all types found for multi-type documents
+                sample[f"{result_field}_all_types"] = list({
+                    s.classification for s in split_resp.splits
+                })
                 sample[f"{result_field}_metadata"] = {
                     "credit_usage": float(getattr(split_resp.metadata, "credit_usage", 0) or 0),
                     "filename": getattr(split_resp.metadata, "filename", None),

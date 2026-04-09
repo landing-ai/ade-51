@@ -150,6 +150,21 @@ def add_model_input(inputs):
     )
 
 
+def add_extract_model_input(inputs):
+    """Add the extraction model selector."""
+    extract_choices = types.Dropdown()
+    extract_choices.add_choice("extract-latest", label="extract-latest  (Latest extraction model)")
+    extract_choices.add_choice("extract-20260314", label="extract-20260314  (March 2026)")
+    inputs.enum(
+        "extract_model",
+        values=extract_choices.values(),
+        label="Extraction model",
+        default="extract-latest",
+        required=True,
+        view=extract_choices,
+    )
+
+
 def add_region_input(inputs):
     """Add the region selector (US vs EU endpoint)."""
     region_choices = types.Dropdown()

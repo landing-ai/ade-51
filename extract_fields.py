@@ -11,6 +11,7 @@ import fiftyone.operators.types as types
 try:
     from .utils import (
         add_model_input,
+        add_extract_model_input,
         add_region_input,
         ade_box_to_fo,
         check_api_key,
@@ -22,6 +23,7 @@ try:
 except ImportError:
     from utils import (
         add_model_input,
+        add_extract_model_input,
         add_region_input,
         ade_box_to_fo,
         check_api_key,
@@ -119,6 +121,10 @@ class ADEExtractFields(foo.Operator):
 
         if parse_first:
             add_model_input(inputs)
+
+        add_extract_model_input(inputs)
+
+        if parse_first:
             inputs.str(
                 "save_parse_field",
                 label="Save Markdown to field",
@@ -224,6 +230,7 @@ class ADEExtractFields(foo.Operator):
         model = ctx.params.get("model", "dpt-2")
         parse_field = ctx.params.get("parse_field", "ade_parse")
         save_parse_field = (ctx.params.get("save_parse_field") or "").strip()
+        extract_model = ctx.params.get("extract_model", "extract-latest")
         grounding_field = ctx.params.get("grounding_field", "ade_grounding")
         result_field = ctx.params.get("result_field", "ade_extraction")
         schema_fields = ctx.params.get("schema_fields") or _DEFAULT_FIELDS
@@ -308,7 +315,7 @@ class ADEExtractFields(foo.Operator):
                         })
                         continue
 
-                extract_resp = client.extract(schema=json_schema_str, markdown=markdown_content)
+                extract_resp = client.extract(schema=json_schema_str, markdown=markdown_content, model=extract_model)
 
                 extraction = extract_resp.extraction
                 if not isinstance(extraction, dict):
@@ -317,16 +324,26 @@ class ADEExtractFields(foo.Operator):
                 for key, value in extraction.items():
                     field_type = properties.get(key, {}).get("type", "string")
                     if field_type == "number":
-                        try:
-                            clean = "".join(
-                                c for c in str(value).replace(",", "").strip()
-                                if c.isdigit() or c in ".+-"
-                            )
-                            value = float(clean) if clean else None
-                        except (ValueError, TypeError):
-                            value = None
+                        if isinstance(value, (int, float)):
+                            pass  # Already numeric from the API
+                        elif value is None:
+                            pass
+                        else:
+                            try:
+                                clean = "".join(
+                                    c for c in str(value).replace(",", "").strip()
+                                    if c.isdigit() or c in ".+-"
+                                )
+                                value = float(clean) if clean else None
+                            except (ValueError, TypeError):
+                                value = None
                     elif field_type == "boolean":
-                        value = value.lower() in ("true", "yes", "1") if isinstance(value, str) else bool(value)
+                        if isinstance(value, bool):
+                            pass  # Already boolean from the API
+                        elif isinstance(value, str):
+                            value = value.lower() in ("true", "yes", "1")
+                        else:
+                            value = bool(value) if value is not None else None
                     if value is not None:
                         sample[f"{result_field}_{key}"] = value
 
