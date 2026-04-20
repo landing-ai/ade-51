@@ -1,4 +1,4 @@
-"""Synchronous document parse operator for the Landing AI ADE FiftyOne plugin."""
+"""Synchronous document parse operator for the LandingAI ADE FiftyOne plugin."""
 
 from pathlib import Path
 
@@ -8,6 +8,7 @@ import fiftyone.operators.types as types
 try:
     from .utils import (
         add_model_input,
+        add_password_input,
         add_region_input,
         check_api_key,
         grounding_to_detections,
@@ -18,6 +19,7 @@ try:
 except ImportError:
     from utils import (
         add_model_input,
+        add_password_input,
         add_region_input,
         check_api_key,
         grounding_to_detections,
@@ -41,7 +43,7 @@ class ADEParseDocument(foo.Operator):
             label="ADE: Parse Document",
             description=(
                 "Convert selected documents to structured Markdown with spatial "
-                "grounding using Landing AI ADE."
+                "grounding using LandingAI ADE."
             ),
             dynamic=True,
             allow_immediate_execution=True,
@@ -57,6 +59,7 @@ class ADEParseDocument(foo.Operator):
         inputs.view_target(ctx)
         add_model_input(inputs)
         add_region_input(inputs)
+        add_password_input(inputs)
 
         inputs.str(
             "result_field",
@@ -84,26 +87,16 @@ class ADEParseDocument(foo.Operator):
                 required=True,
             )
 
-        inputs.bool(
-            "zero_data_retention",
-            label="Zero data retention (ZDR)",
-            description=(
-                "Ensure Landing AI does not retain your document data. "
-                "Requires a plan that supports ZDR. Adds 1 credit/page."
-            ),
-            default=False,
-        )
-
         return types.Property(inputs)
 
     def execute(self, ctx):
         api_key = get_api_key(ctx)
         region = ctx.params.get("region", "us")
-        model = ctx.params.get("model", "dpt-2")
+        model = ctx.params.get("model", "dpt-2-latest")
+        password = (ctx.params.get("password") or "").strip()
         result_field = ctx.params.get("result_field", "ade_parse")
         store_grounding = ctx.params.get("store_grounding", True)
         grounding_field = ctx.params.get("grounding_field", "ade_grounding")
-        zdr = ctx.params.get("zero_data_retention", False)
 
         client = get_client(api_key, region)
         samples = filter_ade_samples(ctx.target_view())
@@ -124,10 +117,11 @@ class ADEParseDocument(foo.Operator):
             ctx.set_progress(progress=i / total, label=f"Parsing {i + 1}/{total}…")
             try:
                 parse_kwargs = {"document": Path(sample.filepath), "model": model}
-                if zdr:
-                    parse_kwargs["zero_data_retention"] = True
+                if password:
+                    parse_kwargs["password"] = password
 
                 response = client.parse(**parse_kwargs)
+                version = getattr(response.metadata, "version", None)
 
                 sample[result_field] = response.markdown
                 sample[f"{result_field}_metadata"] = {
@@ -135,7 +129,8 @@ class ADEParseDocument(foo.Operator):
                     "credit_usage": float(response.metadata.credit_usage or 0),
                     "filename": response.metadata.filename,
                     "duration_ms": response.metadata.duration_ms,
-                    "model_version": getattr(response.metadata, "version", None),
+                    "version": version,
+                    "model_version": version,
                 }
 
                 if store_grounding and response.grounding:
@@ -155,6 +150,7 @@ class ADEParseDocument(foo.Operator):
             "processed": processed,
             "total": total,
             "errors": errors[:5],
+            "error_count": len(errors),
             "result_field": result_field,
             "grounding_field": grounding_field if store_grounding else None,
         }
@@ -166,6 +162,7 @@ class ADEParseDocument(foo.Operator):
         processed = result.get("processed", 0)
         total = result.get("total", 0)
         errors = result.get("errors", [])
+        error_count = result.get("error_count", len(errors))
         result_field = result.get("result_field", "ade_parse")
         grounding_field = result.get("grounding_field")
         message = result.get("message", "")
@@ -177,8 +174,8 @@ class ADEParseDocument(foo.Operator):
         summary = f"Processed {processed}/{total} samples. Markdown stored in '{result_field}'."
         if grounding_field:
             summary += f" Grounding stored in '{grounding_field}'."
-        if errors:
-            summary += f" {len(errors)} error(s) — see below."
+        if error_count:
+            summary += f" {error_count} error(s) — see below."
 
         outputs.view("summary", types.Notice(label=summary))
 

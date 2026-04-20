@@ -1,6 +1,8 @@
-"""Shared utilities for the Landing AI ADE FiftyOne plugin."""
+"""Shared utilities for the LandingAI ADE FiftyOne plugin."""
 
 import os
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import fiftyone.core.labels as fol
@@ -17,26 +19,66 @@ ADE_SUPPORTED_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp",
     ".gif", ".apng", ".dcx", ".dds", ".dib", ".gd", ".icns",
     ".jp2", ".pcx", ".ppm", ".psd", ".tga",
-    ".xlsx", ".xls", ".csv",
+    ".xlsx", ".csv",
     ".ppt", ".pptx",
 })
 
+_API_KEY_NAME = "VISION_AGENT_API_KEY"
+
+
+@lru_cache(maxsize=1)
+def _read_dotenv_api_key() -> Optional[str]:
+    """Read ``VISION_AGENT_API_KEY`` from ``.env`` in the current directory."""
+    env_path = Path.cwd() / ".env"
+    if not env_path.is_file():
+        return None
+
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key.startswith("export "):
+                key = key[len("export "):].strip()
+            if key != _API_KEY_NAME:
+                continue
+
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            if value:
+                return value
+    except OSError:
+        return None
+
+    return None
+
+
+def _resolve_api_key(ctx) -> Optional[str]:
+    """Resolve ``VISION_AGENT_API_KEY`` from secrets, env, or ``.env``."""
+    secrets = getattr(ctx, "secrets", {}) or {}
+    return (
+        secrets.get(_API_KEY_NAME)
+        or os.getenv(_API_KEY_NAME)
+        or _read_dotenv_api_key()
+    )
+
 
 def get_api_key(ctx) -> str:
-    """Resolve the Landing AI API key from FiftyOne secrets or environment.
+    """Resolve the LandingAI API key from FiftyOne secrets or environment.
 
-    Priority: VISION_AGENT_API_KEY (secret → env) then LANDING_AI_API_KEY (secret → env).
+    Priority: FiftyOne secrets, then environment variables, then ``.env`` in the
+    current working directory. The plugin uses ``VISION_AGENT_API_KEY`` only.
     """
-    api_key = (
-        ctx.secrets.get("VISION_AGENT_API_KEY")
-        or os.getenv("VISION_AGENT_API_KEY")
-        or ctx.secrets.get("LANDING_AI_API_KEY")
-        or os.getenv("LANDING_AI_API_KEY")
-    )
+    api_key = _resolve_api_key(ctx)
     if not api_key:
         raise ValueError(
-            "No Landing AI API key found. "
-            "Set the VISION_AGENT_API_KEY environment variable or add it to FiftyOne secrets."
+            "No LandingAI API key found. "
+            "Set VISION_AGENT_API_KEY in your environment or .env file, "
+            "or add it to FiftyOne secrets."
         )
     return api_key
 
@@ -45,7 +87,7 @@ def get_client(api_key: str, region: str = "us"):
     """Return an authenticated ``LandingAIADE`` client for the given region.
 
     Args:
-        api_key: Landing AI / Vision Agent API key.
+        api_key: LandingAI / Vision Agent API key.
         region: ``"us"`` (default) or ``"eu"``.
     """
     if _LandingAIADE is None:
@@ -100,6 +142,33 @@ def grounding_to_detections(grounding: dict) -> Optional[fol.Detections]:
     return fol.Detections(detections=detections) if detections else None
 
 
+def to_plain_data(value):
+    """Convert SDK response objects into plain Python containers."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, dict):
+        return {str(k): to_plain_data(v) for k, v in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [to_plain_data(v) for v in value]
+
+    if hasattr(value, "model_dump"):
+        return to_plain_data(value.model_dump())
+
+    if hasattr(value, "dict"):
+        return to_plain_data(value.dict())
+
+    if hasattr(value, "__dict__"):
+        return {
+            k: to_plain_data(v)
+            for k, v in vars(value).items()
+            if not k.startswith("_")
+        }
+
+    return str(value)
+
+
 def filter_ade_samples(view) -> list:
     """Return samples whose filepath has an ADE-supported extension."""
     return [
@@ -114,19 +183,14 @@ def check_api_key(inputs, ctx) -> bool:
     Call at the top of ``resolve_input``. If it returns ``False``, return
     ``types.Property(inputs, invalid=True)`` immediately.
     """
-    key = (
-        ctx.secrets.get("VISION_AGENT_API_KEY")
-        or os.getenv("VISION_AGENT_API_KEY")
-        or ctx.secrets.get("LANDING_AI_API_KEY")
-        or os.getenv("LANDING_AI_API_KEY")
-    )
+    key = _resolve_api_key(ctx)
     if not key:
         inputs.view(
             "no_api_key_error",
             types.Notice(
                 label=(
-                    "Landing AI API key not found. "
-                    "Set the VISION_AGENT_API_KEY environment variable and restart FiftyOne, "
+                    "LandingAI API key not found. "
+                    "Set VISION_AGENT_API_KEY in your environment or .env file and restart FiftyOne, "
                     "or add it to your FiftyOne secrets config."
                 )
             ),
@@ -136,15 +200,21 @@ def check_api_key(inputs, ctx) -> bool:
 
 
 def add_model_input(inputs):
-    """Add the model selector (dpt-2 vs dpt-2-mini)."""
+    """Add the parse model selector using the docs-style latest aliases."""
     model_choices = types.RadioGroup()
-    model_choices.add_choice("dpt-2", label="dpt-2  (Full featured — 3 credits/page)")
-    model_choices.add_choice("dpt-2-mini", label="dpt-2-mini  (Simple docs, faster — 1.5 credits/page)")
+    model_choices.add_choice(
+        "dpt-2-latest",
+        label="dpt-2-latest  (Full featured — 3 credits/page)",
+    )
+    model_choices.add_choice(
+        "dpt-2-mini-latest",
+        label="dpt-2-mini-latest  (Simple docs, preview — 1.5 credits/page)",
+    )
     inputs.enum(
         "model",
         values=model_choices.values(),
         label="Model",
-        default="dpt-2",
+        default="dpt-2-latest",
         required=True,
         view=model_choices,
     )
@@ -162,6 +232,33 @@ def add_extract_model_input(inputs):
         default="extract-latest",
         required=True,
         view=extract_choices,
+    )
+
+
+def add_split_model_input(inputs):
+    """Add the split model selector."""
+    split_choices = types.Dropdown()
+    split_choices.add_choice("split-latest", label="split-latest  (Latest split model)")
+    split_choices.add_choice("split-20251105", label="split-20251105  (Pinned snapshot)")
+    inputs.enum(
+        "split_model",
+        values=split_choices.values(),
+        label="Split model",
+        default="split-latest",
+        required=True,
+        view=split_choices,
+    )
+
+
+def add_password_input(inputs):
+    """Add an optional password input for encrypted documents."""
+    inputs.str(
+        "password",
+        label="Document password",
+        description=(
+            "Password for password-protected files. Requires a ZDR-enabled account. "
+            "Ignored for unencrypted documents."
+        ),
     )
 
 

@@ -1,5 +1,5 @@
 """
-FiftyOne plugin for Landing AI Agentic Document Extraction (ADE).
+FiftyOne plugin for LandingAI Agentic Document Extraction (ADE).
 
 Operators:
   - ade_parse_document   Sync parse: convert docs to Markdown + grounding Detections
